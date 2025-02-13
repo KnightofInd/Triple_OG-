@@ -1,20 +1,22 @@
+import os
+import time
+import urllib.parse
+from datetime import datetime
+from typing import List, Optional
+
+import requests
+import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
-from typing import List, Optional
-import requests
 from selenium import webdriver
-from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-import time
-import urllib.parse
-import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-from datetime import datetime
 
 # Create FastAPI app instance
 app = FastAPI(
@@ -36,15 +38,18 @@ app.add_middleware(
 PDF_DIR = "./pdfs"
 os.makedirs(PDF_DIR, exist_ok=True)
 
+
 class SearchResult(BaseModel):
     title: str
     url: str
     description: Optional[str] = None
 
+
 class SearchResponse(BaseModel):
     query: str
     results: List[SearchResult]
     total_results: int
+
 
 class FastWebScraper:
     def __init__(self):
@@ -148,8 +153,10 @@ class FastWebScraper:
         c.save()
         return pdf_path  # Return stored PDF path
 
+
 # Create a single instance of the scraper to be reused
 scraper = FastWebScraper()
+
 
 @app.get("/")
 async def root():
@@ -160,6 +167,7 @@ async def root():
         "message": "Welcome to the Web Scraper API",
         "version": "1.2.0",
     }
+
 
 @app.get("/webscrape")
 async def webscrape(query: str, max_results: Optional[int] = 50, output_format: Optional[str] = "json"):
@@ -177,6 +185,7 @@ async def webscrape(query: str, max_results: Optional[int] = 50, output_format: 
 
     return JSONResponse(content={"query": query, "results": results, "total_results": len(results)})
 
+
 @app.get("/list_pdfs")
 async def list_pdfs():
     """
@@ -187,3 +196,9 @@ async def list_pdfs():
         return {"pdf_files": pdf_files} if pdf_files else {"message": "No PDFs found."}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing PDFs: {str(e)}")
+
+
+# Run the API server with dynamic port binding for Render
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 8000))  # Render assigns a dynamic port
+    uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
