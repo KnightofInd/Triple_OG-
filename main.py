@@ -1,34 +1,33 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
 from pydantic import BaseModel
 import uvicorn
 from typing import List, Optional
-import urllib.parse
-import os
-import time
-from datetime import datetime
+import requests
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
 from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.chrome.service import Service
+from webdriver_manager.chrome import ChromeDriverManager
+
 from selenium.webdriver.support import expected_conditions as EC
+import time
+import urllib.parse
+import os
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
+from datetime import datetime
 
-# ✅ Use `/tmp` for PDF storage (Render allows this directory)
-PDF_DIR = "/tmp"
-os.makedirs(PDF_DIR, exist_ok=True)
-
-# ✅ FastAPI app setup
+# Create FastAPI app instance
 app = FastAPI(
     title="Web Scraper API with PDF",
     description="API for scraping web content and exporting results as JSON or PDF",
     version="1.2.0"
 )
 
-# ✅ Enable CORS
+# Add CORS middleware to allow cross-origin requests
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -37,7 +36,10 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ✅ Data Models
+# Ensure "pdfs" directory exists for storing PDF files
+PDF_DIR = "./pdfs"
+os.makedirs(PDF_DIR, exist_ok=True)
+
 class SearchResult(BaseModel):
     title: str
     url: str
@@ -48,26 +50,24 @@ class SearchResponse(BaseModel):
     results: List[SearchResult]
     total_results: int
 
-# ✅ Web Scraper Class
 class FastWebScraper:
     def __init__(self):
-        """Initialize headless Chrome for web scraping"""
         self.chrome_options = Options()
         self.chrome_options.add_argument("--headless")
         self.chrome_options.add_argument("--disable-gpu")
         self.chrome_options.add_argument("--no-sandbox")
         self.chrome_options.add_argument("--disable-dev-shm-usage")
 
+        # Automatically download and use the correct ChromeDriver
+        self.service = Service(ChromeDriverManager().install())
+
     def search_topic(self, topic: str, num_pages: int = 10) -> List[dict]:
-        """Scrape search results from DuckDuckGo"""
         search_results = []
-
-        # ✅ Use Service for ChromeDriver (Fix for Render)
-        service = Service("/usr/bin/chromedriver")  # Path may need adjusting
-        driver = webdriver.Chrome(service=service, options=self.chrome_options)
-
+        driver = webdriver.Chrome(service=self.service, options=self.chrome_options)
+        
         try:
             search_query = urllib.parse.quote(topic)
+            
             for page in range(num_pages):
                 search_url = f"https://duckduckgo.com/html/?q={search_query}&s={page * 30}"
                 driver.get(search_url)
@@ -75,19 +75,19 @@ class FastWebScraper:
                 WebDriverWait(driver, 5).until(
                     EC.presence_of_element_located((By.CLASS_NAME, "result__body"))
                 )
-
+                
                 results = driver.find_elements(By.CLASS_NAME, "result__body")
-
+                
                 for result in results:
                     try:
                         title_elem = result.find_element(By.CLASS_NAME, "result__title")
                         url_elem = result.find_element(By.CLASS_NAME, "result__url")
                         snippet_elem = result.find_element(By.CLASS_NAME, "result__snippet")
-
+                        
                         title = title_elem.text.strip()
                         url = url_elem.get_attribute("href")
                         snippet = snippet_elem.text.strip()
-
+                        
                         if url and self.is_valid_url(url):
                             search_results.append({
                                 'title': title,
@@ -96,23 +96,28 @@ class FastWebScraper:
                             })
                     except Exception:
                         continue
-
+                
                 time.sleep(0.5)
-
+                
                 if len(search_results) >= 50:
                     break
+                    
         finally:
             driver.quit()
-
+            
         return search_results[:50]
 
     def is_valid_url(self, url: str) -> bool:
-        """Basic URL validation"""
+        """
+        Quick validation of URLs
+        """
         allowed_domains = ['.com', '.org', '.net', '.edu', '.gov', '.io']
         return any(domain in url.lower() for domain in allowed_domains)
 
     def generate_pdf(self, query: str, results: List[dict]) -> str:
-        """Generate and store search results as a PDF"""
+        """
+        Generates and stores a PDF file with search results
+        """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         pdf_filename = f"search_results_{query.replace(' ', '_')}_{timestamp}.pdf"
         pdf_path = os.path.join(PDF_DIR, pdf_filename)
@@ -138,14 +143,16 @@ class FastWebScraper:
             y -= 40
 
         c.save()
-        return pdf_path  # ✅ Return stored PDF path
+        return pdf_path  # Return stored PDF path
 
-# ✅ Create a single instance of the scraper
+# Create a single instance of the scraper to be reused
 scraper = FastWebScraper()
 
 @app.get("/")
 async def root():
-    """Root endpoint that returns API information"""
+    """
+    Root endpoint that returns API information
+    """
     return {
         "message": "Welcome to the Web Scraper API",
         "version": "1.2.0",
@@ -158,7 +165,17 @@ async def root():
 
 @app.get("/webscrape")
 async def webscrape(query: str, max_results: Optional[int] = 50, output_format: Optional[str] = "json"):
-    """Scrape web results and return JSON or PDF"""
+    """
+    Endpoint for web scraping based on a search query
+
+    Parameters:
+    - query: The search topic to scrape
+    - max_results: Maximum number of results to return (default: 50)
+    - output_format: "json" (default) or "pdf"
+
+    Returns:
+    - JSON object or a downloadable PDF file
+    """
     try:
         if not query or len(query.strip()) == 0:
             raise HTTPException(status_code=400, detail="Query parameter cannot be empty")
@@ -183,7 +200,9 @@ async def webscrape(query: str, max_results: Optional[int] = 50, output_format: 
 
 @app.get("/list_pdfs")
 async def list_pdfs():
-    """List all stored PDFs"""
+    """
+    Lists all stored PDFs in the 'pdfs' directory
+    """
     try:
         pdf_files = [f for f in os.listdir(PDF_DIR) if f.endswith(".pdf")]
         if not pdf_files:
@@ -194,6 +213,6 @@ async def list_pdfs():
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error listing PDFs: {str(e)}")
 
-# ✅ Run the API server
+# Run the API server
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
