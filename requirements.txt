@@ -4,3 +4,4 @@ selenium
 requests
 pydantic
 reportlab
+webdriver-manager
