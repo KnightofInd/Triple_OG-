@@ -11,6 +11,10 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.chrome.service import Service
 from webdriver_manager.chrome import ChromeDriverManager
+from selenium import webdriver
+from selenium.webdriver.chrome.service import Service
+from selenium.webdriver.chrome.options import Options
+from webdriver_manager.chrome import ChromeDriverManager
 
 from selenium.webdriver.support import expected_conditions as EC
 import time
@@ -53,59 +57,40 @@ class SearchResponse(BaseModel):
 class FastWebScraper:
     def __init__(self):
         self.chrome_options = Options()
-        self.chrome_options.add_argument("--headless")
+        self.chrome_options.add_argument("--headless")  # Run in headless mode (no UI)
         self.chrome_options.add_argument("--disable-gpu")
         self.chrome_options.add_argument("--no-sandbox")
         self.chrome_options.add_argument("--disable-dev-shm-usage")
 
-        # Automatically download and use the correct ChromeDriver
+        # Explicitly specify the Chrome binary location
+        self.chrome_options.binary_location = "/usr/bin/google-chrome-stable"
+
+        # Automatically install the correct ChromeDriver
         self.service = Service(ChromeDriverManager().install())
 
-    def search_topic(self, topic: str, num_pages: int = 10) -> List[dict]:
+    def search_topic(self, topic: str, num_pages: int = 10):
         search_results = []
         driver = webdriver.Chrome(service=self.service, options=self.chrome_options)
-        
+
         try:
             search_query = urllib.parse.quote(topic)
-            
-            for page in range(num_pages):
-                search_url = f"https://duckduckgo.com/html/?q={search_query}&s={page * 30}"
-                driver.get(search_url)
+            search_url = f"https://duckduckgo.com/html/?q={search_query}"
+            driver.get(search_url)
 
-                WebDriverWait(driver, 5).until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "result__body"))
-                )
-                
-                results = driver.find_elements(By.CLASS_NAME, "result__body")
-                
-                for result in results:
-                    try:
-                        title_elem = result.find_element(By.CLASS_NAME, "result__title")
-                        url_elem = result.find_element(By.CLASS_NAME, "result__url")
-                        snippet_elem = result.find_element(By.CLASS_NAME, "result__snippet")
-                        
-                        title = title_elem.text.strip()
-                        url = url_elem.get_attribute("href")
-                        snippet = snippet_elem.text.strip()
-                        
-                        if url and self.is_valid_url(url):
-                            search_results.append({
-                                'title': title,
-                                'url': url,
-                                'description': snippet
-                            })
-                    except Exception:
-                        continue
-                
-                time.sleep(0.5)
-                
-                if len(search_results) >= 50:
-                    break
-                    
+            results = driver.find_elements(By.CLASS_NAME, "result__body")
+            for result in results:
+                try:
+                    title = result.find_element(By.CLASS_NAME, "result__title").text.strip()
+                    url = result.find_element(By.CLASS_NAME, "result__url").get_attribute("href")
+                    snippet = result.find_element(By.CLASS_NAME, "result__snippet").text.strip()
+
+                    search_results.append({"title": title, "url": url, "description": snippet})
+                except Exception:
+                    continue
         finally:
             driver.quit()
-            
-        return search_results[:50]
+        
+        return search_results
 
     def is_valid_url(self, url: str) -> bool:
         """
